@@ -14,6 +14,7 @@ const PROFILES = [
   { id: "christian", name: "Christian" },
   { id: "luca", name: "Luca" },
   { id: "will", name: "Will" },
+  { id: "alex", name: "Alex" },
 ];
 
 const BLOCKS = [
@@ -97,6 +98,41 @@ const SUBJECTS = [
   },
 ];
 
+const ALEX_SUBJECTS = [
+  {
+    id: "se",
+    name: "Systems Engineering",
+    shortName: "SE",
+    credits: 5,
+    color: "#c2410c",
+    examDate: "2026-05-20",
+    topics: [
+      "Introduction to Systems Engineering",
+      "ConOps",
+      "Requirements",
+      "Architectures and Interfaces",
+      "Managing the Systems Engineering Process",
+      "A Systems Approach to Test and Evaluation",
+      "A Systems Approach to Design and Optimisation",
+      "Qualitative Risk and Reliability Assessment",
+      "Quantitative Risk and Reliability Assessment",
+      "Systems of Systems & Future of SE",
+    ],
+  },
+  {
+    id: "avionics",
+    name: "Avionic Systems",
+    shortName: "Avionics",
+    credits: 5,
+    color: "#2563eb",
+    examDate: "2026-06-04",
+    topics: [
+      "Avionic Systems placeholder topic 1",
+      "Avionic Systems placeholder topic 2",
+    ],
+  },
+];
+
 let appState = loadAppState();
 let state = getActiveProfileState();
 let ganttStartOffset = 0;
@@ -165,8 +201,8 @@ applyTheme(loadTheme());
 render();
 initialiseSupabaseSync();
 
-function makeDefaultState() {
-  const subjects = SUBJECTS.map((subject) => ({
+function makeDefaultState(profileId = "default") {
+  const subjects = getDefaultSubjectsForProfile(profileId).map((subject) => ({
     ...subject,
     topics: subject.topics.map((title, index) => ({
       id: `${subject.id}-topic-${index + 1}`,
@@ -182,10 +218,14 @@ function makeDefaultState() {
   };
 }
 
+function getDefaultSubjectsForProfile(profileId) {
+  return profileId === "alex" ? ALEX_SUBJECTS : SUBJECTS;
+}
+
 function makeDefaultAppState() {
   return {
     activeProfile: "christian",
-    profiles: Object.fromEntries(PROFILES.map((profile) => [profile.id, makeDefaultState()])),
+    profiles: Object.fromEntries(PROFILES.map((profile) => [profile.id, makeDefaultState(profile.id)])),
   };
 }
 
@@ -210,7 +250,7 @@ function normaliseAppState(parsed) {
     : "christian";
 
   PROFILES.forEach((profile) => {
-    next.profiles[profile.id] = normaliseProfileState(parsed.profiles[profile.id]);
+    next.profiles[profile.id] = normaliseProfileState(parsed.profiles[profile.id], profile.id);
   });
 
   return next;
@@ -218,13 +258,13 @@ function normaliseAppState(parsed) {
 
 function migrateSingleProfileState(parsed) {
   const next = makeDefaultAppState();
-  next.profiles.christian = normaliseProfileState(parsed);
+  next.profiles.christian = normaliseProfileState(parsed, "christian");
   next.activeProfile = "christian";
   return next;
 }
 
-function normaliseProfileState(profileState) {
-  if (!profileState?.subjects || !profileState?.sessions) return makeDefaultState();
+function normaliseProfileState(profileState, profileId = "default") {
+  if (!profileState?.subjects || !profileState?.sessions) return makeDefaultState(profileId);
   if (profileState.scheduleVersion !== SCHEDULE_VERSION) {
     return {
       ...profileState,
@@ -288,7 +328,7 @@ async function pullRemoteProfiles() {
   isApplyingRemoteState = true;
   data.forEach((row) => {
     if (!appState.profiles[row.id]) return;
-    appState.profiles[row.id] = normaliseProfileState(row.data);
+    appState.profiles[row.id] = normaliseProfileState(row.data, row.id);
   });
   state = getActiveProfileState();
   localStorage.setItem(STORAGE_KEY, JSON.stringify(appState));
@@ -341,10 +381,7 @@ function initialiseControls() {
   });
   els.profileSelect.value = appState.activeProfile;
 
-  SUBJECTS.forEach((subject) => {
-    els.subjectFilter.append(new Option(subject.name, subject.id));
-    els.sessionSubject.append(new Option(subject.name, subject.id));
-  });
+  renderSubjectControls();
 
   BLOCKS.forEach((block) => {
     els.sessionTime.append(new Option(`${block.start}-${block.end}`, block.start));
@@ -428,11 +465,34 @@ function renderProfileTitle() {
   els.saveState.textContent = `Saved for ${getActiveProfile().name}`;
 }
 
+function renderSubjectControls() {
+  const selectedFilter = state.subjects.some((subject) => subject.id === els.subjectFilter.value)
+    ? els.subjectFilter.value
+    : "all";
+  const selectedSubject = state.subjects.some((subject) => subject.id === els.sessionSubject.value)
+    ? els.sessionSubject.value
+    : state.subjects[0]?.id;
+
+  els.subjectFilter.innerHTML = "";
+  els.subjectFilter.append(new Option("All subjects", "all"));
+  els.sessionSubject.innerHTML = "";
+
+  state.subjects.forEach((subject) => {
+    els.subjectFilter.append(new Option(subject.name, subject.id));
+    els.sessionSubject.append(new Option(subject.name, subject.id));
+  });
+
+  els.subjectFilter.value = selectedFilter;
+  els.sessionSubject.value = selectedSubject;
+  populateTopicSelect(els.sessionSubject.value);
+}
+
 function switchProfile() {
   const previousProfile = appState.activeProfile;
   appState.profiles[appState.activeProfile] = state;
   appState.activeProfile = els.profileSelect.value;
   state = getActiveProfileState();
+  renderSubjectControls();
   saveProfileRemote(previousProfile, appState.profiles[previousProfile]);
   saveState();
   render();
@@ -517,7 +577,7 @@ function renderProfileComparison() {
   rows.forEach(({ profile, score }, index) => {
     const row = document.createElement("div");
     row.className = `leaderboard-row${profile.id === appState.activeProfile ? " current" : ""}`;
-    row.style.setProperty("--subject-color", profile.id === "christian" ? "#1d4ed8" : profile.id === "luca" ? "#0f766e" : "#c2410c");
+    row.style.setProperty("--subject-color", getProfileColor(profile.id));
     row.innerHTML = `
       <span class="leaderboard-rank">#${index + 1}</span>
       <div>
@@ -528,6 +588,15 @@ function renderProfileComparison() {
     `;
     list.append(row);
   });
+}
+
+function getProfileColor(profileId) {
+  return {
+    christian: "#1d4ed8",
+    luca: "#0f766e",
+    will: "#c2410c",
+    alex: "#2563eb",
+  }[profileId] || "#64748b";
 }
 
 function renderFocusNext(todayIso, missed) {
@@ -1485,7 +1554,7 @@ function getProfileScore(profileState) {
 
 function resetAll() {
   if (!window.confirm(`Reset ${getActiveProfile().name}'s timetable, topics, and progress to the original plan?`)) return;
-  state = makeDefaultState();
+  state = makeDefaultState(appState.activeProfile);
   appState.profiles[appState.activeProfile] = state;
   markDirtyAndSave();
   render();

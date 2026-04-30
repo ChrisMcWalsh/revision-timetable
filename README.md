@@ -1,6 +1,6 @@
 # Revision Timetable
 
-A shared revision timetable app for Christian, Luca, and Will.
+A shared revision timetable app for Christian, Luca, Will, and Alex.
 
 ## Features
 
