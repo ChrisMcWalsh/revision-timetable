@@ -14,6 +14,14 @@
         <h1>Revision timetable</h1>
       </div>
       <div class="header-tools">
+        <div class="study-mode" id="studyMode">
+          <button class="primary" id="studyStartBtn" type="button" data-tooltip="Start work mode and time your revision session.">Study</button>
+          <div class="study-active" id="studyActive" hidden>
+            <span class="study-timer" id="studyTimer">00:00:00</span>
+            <button id="studyPauseBtn" type="button">Pause</button>
+            <button class="primary" id="studyFinishBtn" type="button">Finish</button>
+          </div>
+        </div>
         <div class="theme-toggle" role="group" aria-label="Theme">
           <button class="theme-btn active" id="lightThemeBtn" type="button">Light</button>
           <button class="theme-btn" id="darkThemeBtn" type="button">Dark</button>
@@ -254,6 +262,57 @@
           <span></span>
           <button value="cancel" type="submit">Close</button>
           <button class="primary" id="copyRestructureBtn" type="button">Copy request</button>
+        </div>
+      </form>
+    </dialog>
+
+    <dialog id="studyDialog">
+      <form method="dialog" class="dialog-card study-dialog-card" id="studyForm">
+        <div class="dialog-head">
+          <div>
+            <h2>Finish study session</h2>
+            <p class="dialog-note" id="studyDialogDuration">Timer: 00:00:00</p>
+          </div>
+          <button class="icon-btn" value="cancel" type="submit" aria-label="Close">x</button>
+        </div>
+
+        <label>
+          Session summary
+          <textarea id="studySummary" rows="3" placeholder="What did you revise? Any notes, resources, or questions to revisit?"></textarea>
+        </label>
+
+        <div class="study-time-row" aria-label="Study session times">
+          <label>
+            Started
+            <span class="time-pair">
+              <input id="studyStartHour" type="text" inputmode="numeric" maxlength="2" aria-label="Start hour" />
+              <span>:</span>
+              <input id="studyStartMinute" type="text" inputmode="numeric" maxlength="2" aria-label="Start minute" />
+            </span>
+          </label>
+          <label>
+            Finished
+            <span class="time-pair">
+              <input id="studyEndHour" type="text" inputmode="numeric" maxlength="2" aria-label="Finish hour" />
+              <span>:</span>
+              <input id="studyEndMinute" type="text" inputmode="numeric" maxlength="2" aria-label="Finish minute" />
+            </span>
+          </label>
+        </div>
+
+        <div class="study-log-head">
+          <h3>What did you study?</h3>
+          <button id="addStudyEntryBtn" type="button">+ Add another</button>
+        </div>
+        <div class="study-entry-list" id="studyEntryList"></div>
+
+        <div class="dialog-actions study-dialog-actions">
+          <span id="studySubmitState"></span>
+          <div class="study-dialog-actions-left">
+            <button class="danger" id="cancelStudySessionBtn" type="button">Cancel session</button>
+            <button value="cancel" type="submit">Go back</button>
+          </div>
+          <button class="primary" id="submitStudyBtn" value="default" type="submit">Submit</button>
         </div>
       </form>
     </dialog>

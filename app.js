@@ -47,6 +47,7 @@ const SUBJECTS = [
     credits: 5,
     color: "#0f766e",
     examDate: "2026-05-18",
+    examTime: "09:00",
     topics: [
       "Introduction to AM",
       "Polymer Powder Bed Fusion",
@@ -67,6 +68,7 @@ const SUBJECTS = [
     credits: 10,
     color: "#7c3aed",
     examDate: "2026-06-04",
+    examTime: "09:00",
     topics: [
       "Governing Equations",
       "Meshing",
@@ -83,6 +85,7 @@ const SUBJECTS = [
     credits: 5,
     color: "#c2410c",
     examDate: "2026-05-28",
+    examTime: "09:00",
     topics: [
       "Introduction to Systems Engineering",
       "ConOps",
@@ -106,6 +109,7 @@ const ALEX_SUBJECTS = [
     credits: 5,
     color: "#c2410c",
     examDate: "2026-05-20",
+    examTime: "09:00",
     topics: [
       "Introduction to Systems Engineering",
       "ConOps",
@@ -126,6 +130,7 @@ const ALEX_SUBJECTS = [
     credits: 5,
     color: "#2563eb",
     examDate: "2026-06-04",
+    examTime: "09:00",
     topics: [
       "Avionic Systems placeholder topic 1",
       "Avionic Systems placeholder topic 2",
@@ -142,9 +147,25 @@ let tooltipWarmTimer = null;
 let supabaseClient = null;
 let remoteSyncTimer = null;
 let isApplyingRemoteState = false;
+let openExamEditorSubjectId = null;
+let editingStudySessionId = null;
+let sessionContextMenu = null;
+let studyTimer = {
+  active: false,
+  paused: false,
+  startedAt: null,
+  pausedAt: null,
+  elapsedPausedMs: 0,
+  intervalId: null,
+};
 
 const els = {
   saveState: document.querySelector("#saveState"),
+  studyStartBtn: document.querySelector("#studyStartBtn"),
+  studyActive: document.querySelector("#studyActive"),
+  studyTimer: document.querySelector("#studyTimer"),
+  studyPauseBtn: document.querySelector("#studyPauseBtn"),
+  studyFinishBtn: document.querySelector("#studyFinishBtn"),
   lightThemeBtn: document.querySelector("#lightThemeBtn"),
   darkThemeBtn: document.querySelector("#darkThemeBtn"),
   profileSelect: document.querySelector("#profileSelect"),
@@ -178,6 +199,18 @@ const els = {
   resetBtn: document.querySelector("#resetBtn"),
   dialog: document.querySelector("#sessionDialog"),
   restructureDialog: document.querySelector("#restructureDialog"),
+  studyDialog: document.querySelector("#studyDialog"),
+  studyForm: document.querySelector("#studyForm"),
+  studyDialogDuration: document.querySelector("#studyDialogDuration"),
+  studySummary: document.querySelector("#studySummary"),
+  studyStartHour: document.querySelector("#studyStartHour"),
+  studyStartMinute: document.querySelector("#studyStartMinute"),
+  studyEndHour: document.querySelector("#studyEndHour"),
+  studyEndMinute: document.querySelector("#studyEndMinute"),
+  studyEntryList: document.querySelector("#studyEntryList"),
+  addStudyEntryBtn: document.querySelector("#addStudyEntryBtn"),
+  cancelStudySessionBtn: document.querySelector("#cancelStudySessionBtn"),
+  studySubmitState: document.querySelector("#studySubmitState"),
   restructureText: document.querySelector("#restructureText"),
   restructureWarning: document.querySelector("#restructureWarning"),
   restructurePrompt: document.querySelector("#restructurePrompt"),
@@ -265,6 +298,9 @@ function migrateSingleProfileState(parsed) {
 
 function normaliseProfileState(profileState, profileId = "default") {
   if (!profileState?.subjects || !profileState?.sessions) return makeDefaultState(profileId);
+  profileState.subjects.forEach((subject) => {
+    subject.examTime = subject.examTime || "09:00";
+  });
   if (profileState.scheduleVersion !== SCHEDULE_VERSION) {
     return {
       ...profileState,
@@ -311,7 +347,7 @@ async function initialiseSupabaseSync() {
 
 async function pullRemoteProfiles() {
   if (!supabaseClient) return;
-  if (calendarDrag || els.dialog.open || els.restructureDialog.open) return;
+  if (calendarDrag || els.dialog.open || els.restructureDialog.open || els.studyDialog.open) return;
 
   const { data, error } = await supabaseClient
     .from(SUPABASE_TABLE)
@@ -398,6 +434,12 @@ function initialiseControls() {
   els.lightThemeBtn.addEventListener("click", () => setTheme("light"));
   els.darkThemeBtn.addEventListener("click", () => setTheme("dark"));
   els.profileSelect.addEventListener("change", switchProfile);
+  els.studyStartBtn.addEventListener("click", startStudyMode);
+  els.studyPauseBtn.addEventListener("click", toggleStudyPause);
+  els.studyFinishBtn.addEventListener("click", openStudyFinishDialog);
+  els.addStudyEntryBtn.addEventListener("click", () => appendStudyEntry());
+  els.cancelStudySessionBtn.addEventListener("click", cancelStudySessionFromDialog);
+  els.studyForm.addEventListener("submit", handleStudySubmit);
   els.ganttRange.addEventListener("change", handleGanttRangeChange);
   els.ganttToggle.addEventListener("click", toggleGanttPanel);
   els.calendarRange.addEventListener("change", renderCalendarEditor);
@@ -415,6 +457,10 @@ function initialiseControls() {
   els.sessionSubject.addEventListener("change", () => populateTopicSelect(els.sessionSubject.value));
   els.sessionForm.addEventListener("submit", handleSessionSubmit);
   els.deleteSessionBtn.addEventListener("click", deleteCurrentSession);
+  document.addEventListener("click", hideSessionContextMenu);
+  document.addEventListener("keydown", (event) => {
+    if (event.key === "Escape") hideSessionContextMenu();
+  });
   initialiseTooltips();
 }
 
@@ -487,7 +533,378 @@ function renderSubjectControls() {
   populateTopicSelect(els.sessionSubject.value);
 }
 
+function startStudyMode() {
+  const now = Date.now();
+  studyTimer = {
+    active: true,
+    paused: false,
+    startedAt: now,
+    pausedAt: null,
+    elapsedPausedMs: 0,
+    intervalId: window.setInterval(updateStudyTimerDisplay, 1000),
+  };
+  els.studyStartBtn.hidden = true;
+  els.studyActive.hidden = false;
+  els.studyPauseBtn.textContent = "Pause";
+  updateStudyTimerDisplay();
+}
+
+function toggleStudyPause() {
+  if (!studyTimer.active) return;
+
+  if (studyTimer.paused) {
+    studyTimer.elapsedPausedMs += Date.now() - studyTimer.pausedAt;
+    studyTimer.paused = false;
+    studyTimer.pausedAt = null;
+    studyTimer.intervalId = window.setInterval(updateStudyTimerDisplay, 1000);
+    els.studyPauseBtn.textContent = "Pause";
+  } else {
+    studyTimer.paused = true;
+    studyTimer.pausedAt = Date.now();
+    window.clearInterval(studyTimer.intervalId);
+    els.studyPauseBtn.textContent = "Resume";
+  }
+
+  updateStudyTimerDisplay();
+}
+
+function openStudyFinishDialog() {
+  if (!studyTimer.active) return;
+  if (!studyTimer.paused) toggleStudyPause();
+  editingStudySessionId = null;
+  els.studySummary.value = "";
+  els.studySubmitState.textContent = "";
+  els.studyEntryList.innerHTML = "";
+  const elapsedMs = getStudyElapsedMs();
+  const startedAt = new Date(studyTimer.startedAt);
+  const endedAt = new Date(studyTimer.startedAt + elapsedMs);
+  els.studyDialogDuration.textContent = `Timer: ${formatDuration(elapsedMs)}`;
+  setStudyTimeFields(startedAt, endedAt);
+  appendStudyEntry();
+  els.studyDialog.showModal();
+}
+
+function handleStudySubmit(event) {
+  event.preventDefault();
+  const submitter = event.submitter;
+  if (submitter?.value === "cancel") {
+    els.studyDialog.close();
+    if (editingStudySessionId) {
+      editingStudySessionId = null;
+    } else if (studyTimer.active && studyTimer.paused) {
+      toggleStudyPause();
+    }
+    return;
+  }
+
+  const entries = collectStudyEntries();
+  if (!entries.length) {
+    els.studySubmitState.textContent = "Add at least one study item.";
+    return;
+  }
+  const adjustedTimes = getAdjustedStudyTimes();
+  if (!adjustedTimes) {
+    els.studySubmitState.textContent = "Enter valid start and finish times.";
+    return;
+  }
+
+  if (editingStudySessionId) {
+    const affected = updateLoggedStudySession(editingStudySessionId, entries, adjustedTimes);
+    editingStudySessionId = null;
+    markStudyTopicsComplete(entries);
+    refreshTopicCompletionForKeys(affected);
+  } else {
+    const elapsedMs = adjustedTimes.endedAt - adjustedTimes.startedAt;
+    const session = makeLoggedStudySession(entries, elapsedMs, adjustedTimes.startedAt, adjustedTimes.endedAt);
+    removeMatchedPlannedSessions(session, entries);
+    state.sessions.push(session);
+    state.sessions.sort(compareSessionTime);
+    stopStudyMode();
+    markStudyTopicsComplete(entries);
+  }
+  els.studyDialog.close();
+  markDirtyAndSave();
+  switchView("dashboard");
+  render();
+}
+
+function cancelStudySessionFromDialog() {
+  if (editingStudySessionId) {
+    els.studyDialog.close();
+    editingStudySessionId = null;
+    return;
+  }
+
+  const confirmed = window.confirm("Cancel this revision session? The timer will be discarded and nothing will be logged.");
+  if (!confirmed) return;
+
+  els.studyDialog.close();
+  stopStudyMode();
+}
+
+function appendStudyEntry(entry = {}) {
+  const row = document.createElement("div");
+  row.className = "study-entry";
+  row.innerHTML = `
+    <label>
+      Module
+      <select class="study-entry-subject" required></select>
+    </label>
+    <label>
+      Topics
+      <select class="study-entry-topics" multiple required></select>
+    </label>
+    <label>
+      Type
+      <select class="study-entry-type" required></select>
+    </label>
+    <label>
+      Minutes
+      <input class="study-entry-minutes" type="number" min="5" step="5" value="${entry.minutes || 60}" required>
+    </label>
+    <button class="study-entry-remove" type="button" aria-label="Remove study item">x</button>
+  `;
+
+  const subjectSelect = row.querySelector(".study-entry-subject");
+  const topicSelect = row.querySelector(".study-entry-topics");
+  const typeSelect = row.querySelector(".study-entry-type");
+
+  state.subjects.forEach((subject) => subjectSelect.append(new Option(subject.name, subject.id)));
+  SESSION_TYPES.forEach((type) => typeSelect.append(new Option(type, type)));
+  subjectSelect.value = entry.subjectId || state.subjects[0]?.id || "";
+  typeSelect.value = entry.type || "Topic study";
+
+  const refreshTopics = () => {
+    const selectedTopicIds = entry.topicIds || [...topicSelect.selectedOptions].map((option) => option.value);
+    populateStudyTopicSelect(topicSelect, subjectSelect.value, selectedTopicIds);
+  };
+  subjectSelect.addEventListener("change", () => {
+    entry.topicIds = [];
+    refreshTopics();
+  });
+  refreshTopics();
+
+  row.querySelector(".study-entry-remove").addEventListener("click", () => {
+    if (els.studyEntryList.children.length > 1) row.remove();
+  });
+
+  els.studyEntryList.append(row);
+}
+
+function populateStudyTopicSelect(select, subjectId, selectedTopicIds = []) {
+  const subject = getSubject(subjectId);
+  select.innerHTML = "";
+  subject.topics.forEach((topic) => {
+    const option = new Option(topic.title, topic.id);
+    option.selected = selectedTopicIds.includes(topic.id) || (!selectedTopicIds.length && select.options.length === 0);
+    select.append(option);
+  });
+}
+
+function collectStudyEntries() {
+  return [...els.studyEntryList.querySelectorAll(".study-entry")]
+    .map((row) => {
+      const subjectId = row.querySelector(".study-entry-subject").value;
+      const topicIds = [...row.querySelector(".study-entry-topics").selectedOptions].map((option) => option.value);
+      const type = row.querySelector(".study-entry-type").value;
+      const minutes = Number(row.querySelector(".study-entry-minutes").value);
+      return { subjectId, topicIds, type, minutes };
+    })
+    .filter((entry) => entry.subjectId && entry.topicIds.length && entry.type && entry.minutes > 0);
+}
+
+function makeLoggedStudySession(entries, elapsedMs, startedAt, endedAt) {
+  const primary = entries[0];
+  const primaryTopicId = primary.topicIds[0];
+  const actualMinutes = Math.max(1, Math.round(elapsedMs / 60000));
+  const date = toIso(startedAt);
+  return {
+    id: makeId(),
+    date,
+    start: minutesToTime(startedAt.getHours() * 60 + startedAt.getMinutes()),
+    end: minutesToTime(endedAt.getHours() * 60 + endedAt.getMinutes()),
+    duration: actualMinutes,
+    subjectId: primary.subjectId,
+    topicId: primaryTopicId,
+    type: primary.type,
+    notes: els.studySummary.value.trim(),
+    complete: true,
+    locked: false,
+    logged: true,
+    studyLog: normaliseStudyLogEntries(entries),
+    timerMinutes: actualMinutes,
+  };
+}
+
+function updateLoggedStudySession(sessionId, entries, adjustedTimes) {
+  const session = state.sessions.find((item) => item.id === sessionId);
+  if (!session) return [];
+  const affected = getStudyLogTopicKeys(session);
+  const primary = entries[0];
+  const duration = Math.max(1, Math.round((adjustedTimes.endedAt - adjustedTimes.startedAt) / 60000));
+  session.date = toIso(adjustedTimes.startedAt);
+  session.start = minutesToTime(adjustedTimes.startedAt.getHours() * 60 + adjustedTimes.startedAt.getMinutes());
+  session.end = minutesToTime(adjustedTimes.endedAt.getHours() * 60 + adjustedTimes.endedAt.getMinutes());
+  session.duration = duration;
+  session.timerMinutes = duration;
+  session.subjectId = primary.subjectId;
+  session.topicId = primary.topicIds[0];
+  session.type = primary.type;
+  session.notes = els.studySummary.value.trim();
+  session.studyLog = normaliseStudyLogEntries(entries);
+  return [...affected, ...getStudyLogTopicKeys(session)];
+}
+
+function normaliseStudyLogEntries(entries) {
+  return entries.map((entry) => ({
+    ...entry,
+    topicTitles: entry.topicIds.map((topicId) => getTopic(entry.subjectId, topicId)?.title || "Custom topic"),
+    subjectName: getSubject(entry.subjectId).name,
+  }));
+}
+
+function removeMatchedPlannedSessions(loggedSession, entries) {
+  const matched = new Set();
+  entries.forEach((entry) => {
+    entry.topicIds.forEach((topicId) => {
+      const session = state.sessions
+        .filter((item) => (
+          !item.complete &&
+          !item.logged &&
+          !item.exam &&
+          item.date === loggedSession.date &&
+          intervalsOverlap(item.start, item.end, loggedSession.start, loggedSession.end) &&
+          item.subjectId === entry.subjectId &&
+          item.topicId === topicId &&
+          item.type === entry.type
+        ))
+        .sort(compareSessionTime)[0];
+      if (session) matched.add(session.id);
+    });
+  });
+  state.sessions = state.sessions.filter((session) => !matched.has(session.id));
+}
+
+function markStudyTopicsComplete(entries) {
+  entries.forEach((entry) => {
+    entry.topicIds.forEach((topicId) => {
+      const topic = getTopic(entry.subjectId, topicId);
+      if (topic) topic.complete = true;
+    });
+  });
+}
+
+function openLoggedStudyEditDialog(session) {
+  hideSessionContextMenu();
+  editingStudySessionId = session.id;
+  els.studySummary.value = session.notes || "";
+  els.studySubmitState.textContent = "";
+  els.studyEntryList.innerHTML = "";
+  els.studyDialogDuration.textContent = `Logged time: ${formatDuration((session.timerMinutes || session.duration || 0) * 60000)}`;
+  setStudyTimeFields(
+    new Date(`${session.date}T${session.start}:00`),
+    new Date(`${session.date}T${session.end}:00`),
+  );
+  (session.studyLog || [{
+    subjectId: session.subjectId,
+    topicIds: [session.topicId],
+    type: session.type,
+    minutes: session.duration || 60,
+  }]).forEach((entry) => appendStudyEntry(entry));
+  els.studyDialog.showModal();
+}
+
+function deleteLoggedStudySession(session) {
+  hideSessionContextMenu();
+  const affected = getStudyLogTopicKeys(session);
+  state.sessions = state.sessions.filter((item) => item.id !== session.id);
+  refreshTopicCompletionForKeys(affected);
+  markDirtyAndSave();
+  render();
+}
+
+function getStudyLogTopicKeys(session) {
+  const entries = session.studyLog?.length
+    ? session.studyLog
+    : [{ subjectId: session.subjectId, topicIds: [session.topicId] }];
+  return entries.flatMap((entry) => entry.topicIds.map((topicId) => `${entry.subjectId}:${topicId}`));
+}
+
+function refreshTopicCompletionForKeys(keys) {
+  [...new Set(keys)].forEach((key) => {
+    const [subjectId, topicId] = key.split(":");
+    const topic = getTopic(subjectId, topicId);
+    if (!topic) return;
+    topic.complete = state.sessions.some((session) => session.complete && sessionCoversTopic(session, subjectId, topicId));
+  });
+}
+
+function sessionCoversTopic(session, subjectId, topicId) {
+  if (session.subjectId === subjectId && session.topicId === topicId) return true;
+  return Boolean(session.studyLog?.some((entry) => entry.subjectId === subjectId && entry.topicIds.includes(topicId)));
+}
+
+function stopStudyMode() {
+  window.clearInterval(studyTimer.intervalId);
+  studyTimer = {
+    active: false,
+    paused: false,
+    startedAt: null,
+    pausedAt: null,
+    elapsedPausedMs: 0,
+    intervalId: null,
+  };
+  els.studyStartBtn.hidden = false;
+  els.studyActive.hidden = true;
+  els.studyTimer.textContent = "00:00:00";
+  els.studyPauseBtn.textContent = "Pause";
+}
+
+function updateStudyTimerDisplay() {
+  els.studyTimer.textContent = formatDuration(getStudyElapsedMs());
+}
+
+function getStudyElapsedMs() {
+  if (!studyTimer.active) return 0;
+  const end = studyTimer.paused ? studyTimer.pausedAt : Date.now();
+  return Math.max(0, end - studyTimer.startedAt - studyTimer.elapsedPausedMs);
+}
+
+function setStudyTimeFields(startedAt, endedAt) {
+  els.studyStartHour.value = String(startedAt.getHours()).padStart(2, "0");
+  els.studyStartMinute.value = String(startedAt.getMinutes()).padStart(2, "0");
+  els.studyEndHour.value = String(endedAt.getHours()).padStart(2, "0");
+  els.studyEndMinute.value = String(endedAt.getMinutes()).padStart(2, "0");
+}
+
+function getAdjustedStudyTimes() {
+  const start = readTimePair(els.studyStartHour.value, els.studyStartMinute.value);
+  const end = readTimePair(els.studyEndHour.value, els.studyEndMinute.value);
+  if (!start || !end) return null;
+
+  const baseDate = editingStudySessionId
+    ? state.sessions.find((session) => session.id === editingStudySessionId)?.date
+    : toIso(new Date(studyTimer.startedAt));
+  const startedAt = new Date(`${baseDate}T${minutesToTime(start)}:00`);
+  let endedAt = new Date(`${baseDate}T${minutesToTime(end)}:00`);
+  if (endedAt <= startedAt) endedAt = new Date(endedAt.getTime() + 86400000);
+  return { startedAt, endedAt };
+}
+
+function readTimePair(hourValue, minuteValue) {
+  const hour = Number(hourValue);
+  const minute = Number(minuteValue);
+  if (!Number.isInteger(hour) || !Number.isInteger(minute)) return null;
+  if (hour < 0 || hour > 23 || minute < 0 || minute > 59) return null;
+  return hour * 60 + minute;
+}
+
 function switchProfile() {
+  if (studyTimer.active) {
+    els.profileSelect.value = appState.activeProfile;
+    window.alert("Finish the current study timer before switching profiles.");
+    return;
+  }
   const previousProfile = appState.activeProfile;
   appState.profiles[appState.activeProfile] = state;
   appState.activeProfile = els.profileSelect.value;
@@ -527,9 +944,7 @@ function renderDashboard() {
   if (!todaySessions.length) {
     els.todayList.innerHTML = `<div class="free-day">No study blocks today.</div>`;
   } else {
-    todaySessions.forEach((session) => {
-      els.todayList.append(renderMiniSession(session));
-    });
+    renderTodaySessions(todaySessions).forEach((item) => els.todayList.append(item));
   }
 
   els.dashboardProgress.innerHTML = `
@@ -544,16 +959,89 @@ function renderDashboard() {
   renderFocusNext(todayIso, missed);
 }
 
-function renderMiniSession(session) {
+function renderTodaySessions(todaySessions) {
+  const groupedPlannedIds = new Set();
+  const groups = todaySessions
+    .filter((session) => session.logged)
+    .map((logged) => {
+      const planned = todaySessions
+        .filter((session) => !session.logged && !session.complete && intervalsOverlap(session.start, session.end, logged.start, logged.end))
+        .sort(compareSessionTime);
+      planned.forEach((session) => groupedPlannedIds.add(session.id));
+      return { type: "overlap", logged, planned, sortKey: planned[0]?.start < logged.start ? planned[0].start : logged.start };
+    })
+    .filter((group) => group.planned.length);
+
+  const items = [
+    ...todaySessions
+      .filter((session) => !groupedPlannedIds.has(session.id) && !groups.some((group) => group.logged.id === session.id))
+      .map((session) => ({ type: "session", session, sortKey: session.start })),
+    ...groups,
+  ].sort((a, b) => a.sortKey.localeCompare(b.sortKey));
+
+  return items.map((item) => {
+    if (item.type === "session") return renderMiniSession(item.session, { showCheckbox: !item.session.logged });
+    return renderOverlapGroup(item.logged, item.planned);
+  });
+}
+
+function renderOverlapGroup(logged, plannedSessions) {
+  const group = document.createElement("div");
+  group.className = "today-overlap-group";
+  group.innerHTML = `
+    <div class="overlap-column">
+      <span class="overlap-label">Recommended</span>
+    </div>
+    <div class="overlap-column">
+      <span class="overlap-label">Studied</span>
+    </div>
+  `;
+  const columns = group.querySelectorAll(".overlap-column");
+  plannedSessions.forEach((session) => {
+    columns[0].append(renderMiniSession(session, { displaced: !loggedStudyCoversPlannedSession(logged, session) }));
+  });
+  columns[1].append(renderMiniSession(logged));
+  return group;
+}
+
+function loggedStudyCoversPlannedSession(logged, planned) {
+  return Boolean(logged.studyLog?.some((entry) => (
+    entry.subjectId === planned.subjectId &&
+    entry.type === planned.type &&
+    entry.topicIds.includes(planned.topicId)
+  )));
+}
+
+function renderMiniSession(session, options = {}) {
   const subject = getSubject(session.subjectId);
   const topic = getTopic(session.subjectId, session.topicId);
   const item = document.createElement("div");
-  item.className = `mini-session${session.complete ? " complete" : ""}`;
+  item.className = `mini-session${session.complete ? " complete" : ""}${session.logged ? " logged" : ""}${isSessionOverdue(session) ? " overdue" : ""}${options.displaced ? " displaced" : ""}`;
   item.style.setProperty("--subject-color", subject.color);
+  const detail = session.logged
+    ? getStudyLogSummary(session)
+    : `${escapeHtml(topic?.title || "Custom topic")}${session.complete ? " - complete" : isSessionOverdue(session) ? " - not complete" : ""}`;
   item.innerHTML = `
-    <strong>${session.start}-${session.end} - ${subject.shortName}: ${escapeHtml(session.type)}</strong>
-    <span>${escapeHtml(topic?.title || "Custom topic")}${session.complete ? " - complete" : ""}</span>
+    <div class="mini-session-main">
+      <strong>${session.start}-${session.end} - ${session.logged ? "Study log" : `${subject.shortName}: ${escapeHtml(session.type)}`}</strong>
+      <span>${detail}</span>
+    </div>
+    ${options.showCheckbox ? `
+      <label class="mini-session-check">
+        <input type="checkbox" ${session.complete ? "checked" : ""} aria-label="Mark session complete">
+      </label>
+    ` : ""}
   `;
+  const checkbox = item.querySelector(".mini-session-check input");
+  if (checkbox) {
+    checkbox.addEventListener("change", (event) => {
+      session.complete = event.target.checked;
+      updateTopicCompletionFromSessions(session);
+      markDirtyAndSave();
+      render();
+    });
+  }
+  item.addEventListener("contextmenu", (event) => showSessionContextMenu(event, session));
   return item;
 }
 
@@ -657,22 +1145,23 @@ function generateSessions(subjects) {
     ]),
   );
 
-  eachDate(PLAN_START, PLAN_END).forEach((date) => {
+  eachDate(PLAN_START, getScheduleEnd(subjects)).forEach((date) => {
     const iso = toIso(date);
     if (date.getDay() === 0) return;
 
     const examSubject = subjects.find((subject) => subject.examDate === iso);
     if (examSubject) {
+      const examStart = examSubject.examTime || "09:00";
       sessions.push({
         id: makeId(),
         date: iso,
-        start: "09:00",
-        end: "10:30",
+        start: examStart,
+        end: minutesToTime(timeToMinutes(examStart) + 90),
         duration: 90,
         subjectId: examSubject.id,
         topicId: examSubject.topics[0]?.id ?? "",
         type: "Light review",
-        notes: `${examSubject.name} exam day. Keep this block for final formulae, checklists, and calm recall.`,
+        notes: `${examSubject.name} exam day at ${examStart}. Keep this block for final formulae, checklists, and calm recall.`,
         complete: false,
         locked: false,
         exam: true,
@@ -809,24 +1298,76 @@ function pickSubject(subjects, dateIso, existingSessions, blockIndex) {
 function renderCountdowns() {
   els.countdowns.innerHTML = "";
   const todayIso = getStudyTodayIso();
-  [...state.subjects].sort((a, b) => a.examDate.localeCompare(b.examDate)).forEach((subject) => {
+  [...state.subjects].sort((a, b) => `${a.examDate}-${a.examTime || "09:00"}`.localeCompare(`${b.examDate}-${b.examTime || "09:00"}`)).forEach((subject) => {
     const days = daysBetween(todayIso, subject.examDate);
+    const isEditing = openExamEditorSubjectId === subject.id;
     const card = document.createElement("div");
-    card.className = "countdown";
+    card.className = `countdown${isEditing ? " editing" : ""}`;
     card.style.setProperty("--subject-color", subject.color);
     card.innerHTML = `
-      <strong>${subject.name}</strong>
-      <span>${formatDate(subject.examDate)} - ${days} days - ${subject.credits} credits</span>
+      <button class="countdown-summary" type="button" aria-expanded="${isEditing}" data-subject-id="${escapeHtml(subject.id)}" data-tooltip="Open exam date and time editing for this module.">
+        <strong>${subject.name}</strong>
+        <span>${formatDate(subject.examDate)} at ${subject.examTime || "09:00"} - ${days} days - ${subject.credits} credits</span>
+      </button>
+      <form class="exam-editor${isEditing ? "" : " hidden"}" data-subject-id="${escapeHtml(subject.id)}">
+        <label>
+          Date
+          <input type="date" name="examDate" value="${escapeHtml(subject.examDate)}" min="${PLAN_START}">
+        </label>
+        <label>
+          Time
+          <input type="time" name="examTime" value="${escapeHtml(subject.examTime || "09:00")}">
+        </label>
+        <button type="submit" data-tooltip="Save this exam date and time, then rebuild the timetable around it.">Update</button>
+        <button type="button" class="ghost exam-editor-cancel">Cancel</button>
+      </form>
     `;
+    card.querySelector(".countdown-summary").addEventListener("click", () => {
+      openExamEditorSubjectId = openExamEditorSubjectId === subject.id ? null : subject.id;
+      renderCountdowns();
+    });
+    card.querySelector(".exam-editor").addEventListener("submit", handleExamEditorSubmit);
+    card.querySelector(".exam-editor-cancel").addEventListener("click", () => {
+      openExamEditorSubjectId = null;
+      renderCountdowns();
+    });
     els.countdowns.append(card);
   });
+}
+
+function handleExamEditorSubmit(event) {
+  event.preventDefault();
+  const form = event.currentTarget;
+  const subject = state.subjects.find((item) => item.id === form.dataset.subjectId);
+  if (!subject) return;
+
+  const nextDate = form.elements.examDate.value;
+  const nextTime = form.elements.examTime.value || "09:00";
+  if (!nextDate) return;
+  if (nextDate === subject.examDate && nextTime === (subject.examTime || "09:00")) return;
+
+  const confirmed = window.confirm(
+    `Update ${subject.name} to ${formatDate(nextDate)} at ${nextTime} and regenerate this profile's timetable around the new exam date? Manual session edits may be replaced.`,
+  );
+  if (!confirmed) {
+    form.elements.examDate.value = subject.examDate;
+    form.elements.examTime.value = subject.examTime || "09:00";
+    return;
+  }
+
+  subject.examDate = nextDate;
+  subject.examTime = nextTime;
+  openExamEditorSubjectId = null;
+  regenerateSessionsFromCurrentSubjects();
+  markDirtyAndSave();
+  render();
 }
 
 function renderCalendar() {
   const filter = els.subjectFilter.value;
   els.calendar.innerHTML = "";
 
-  eachDate(PLAN_START, PLAN_END).forEach((date) => {
+  eachDate(PLAN_START, getScheduleEnd()).forEach((date) => {
     const iso = toIso(date);
     const day = document.createElement("article");
     day.className = "day-card";
@@ -845,7 +1386,7 @@ function renderCalendar() {
       const exam = document.createElement("div");
       exam.className = "exam-day";
       exam.style.setProperty("--subject-color", color);
-      exam.textContent = `${examSubject.name} exam. Light recall only.`;
+      exam.textContent = `${examSubject.name} exam at ${examSubject.examTime || "09:00"}. Light recall only.`;
       day.append(exam);
       appendSessions(day, iso, filter);
     } else {
@@ -858,7 +1399,8 @@ function renderCalendar() {
 
 function renderCalendarEditor() {
   const visibleDays = Number(els.calendarRange.value || 7);
-  calendarEditorStart = clampIsoDate(calendarEditorStart, PLAN_START, addDays(PLAN_END, -(visibleDays - 1)));
+  const scheduleEnd = getScheduleEnd();
+  calendarEditorStart = clampIsoDate(calendarEditorStart, PLAN_START, addDays(scheduleEnd, -(visibleDays - 1)));
   els.calendarStart.value = calendarEditorStart;
   els.calendarEditor.innerHTML = "";
   els.calendarEditor.classList.toggle("range-day", visibleDays === 1);
@@ -906,22 +1448,44 @@ function renderCalendarEditor() {
       grid.append(line);
     }
 
-    state.sessions
+    const daySessions = state.sessions
       .filter((session) => session.date === iso)
-      .sort(compareSessionTime)
-      .forEach((session) => grid.append(renderCalendarEditorSession(session)));
+      .sort(compareSessionTime);
+    const laneOptions = getCalendarOverlapLaneOptions(daySessions);
+    daySessions.forEach((session) => grid.append(renderCalendarEditorSession(session, laneOptions.get(session.id))));
 
     els.calendarEditor.append(day);
   });
 }
 
-function renderCalendarEditorSession(session) {
+function getCalendarOverlapLaneOptions(sessions) {
+  const options = new Map();
+  const loggedSessions = sessions.filter((session) => session.logged);
+  const plannedSessions = sessions.filter((session) => !session.logged && !session.complete);
+
+  loggedSessions.forEach((logged) => {
+    const overlappingPlanned = plannedSessions.filter((planned) => intervalsOverlap(planned.start, planned.end, logged.start, logged.end));
+    if (!overlappingPlanned.length) return;
+
+    options.set(logged.id, { lane: "right" });
+    overlappingPlanned.forEach((planned) => {
+      options.set(planned.id, {
+        lane: "left",
+        displaced: !loggedStudyCoversPlannedSession(logged, planned),
+      });
+    });
+  });
+
+  return options;
+}
+
+function renderCalendarEditorSession(session, options = {}) {
   const subject = getSubject(session.subjectId);
   const topic = getTopic(session.subjectId, session.topicId);
   const start = timeToMinutes(session.start);
   const duration = Number(session.duration || minutesBetween(session.start, session.end));
   const card = document.createElement("div");
-  card.className = `calendar-edit-session${session.complete ? " complete" : ""}`;
+  card.className = `calendar-edit-session${session.complete ? " complete" : ""}${session.logged ? " logged" : ""}${isSessionOverdue(session) ? " overdue" : ""}${options?.lane ? ` compare-${options.lane}` : ""}${options?.displaced ? " displaced" : ""}`;
   card.dataset.sessionId = session.id;
   card.style.setProperty("--subject-color", subject.color);
   card.style.top = `${Math.max(0, start - DAY_START_MINUTES) * CALENDAR_PIXELS_PER_MINUTE}px`;
@@ -929,7 +1493,7 @@ function renderCalendarEditorSession(session) {
   card.innerHTML = `
     <div class="calendar-session-body" data-drag-handle="move">
       <strong>${session.start}-${session.end} ${subject.shortName}</strong>
-      <span>${escapeHtml(topic?.title || "Custom topic")}</span>
+      <span>${session.logged ? getStudyLogSummary(session) : escapeHtml(topic?.title || "Custom topic")}</span>
     </div>
     <button class="calendar-resize-handle" type="button" data-drag-handle="resize" aria-label="Resize session"></button>
   `;
@@ -937,6 +1501,7 @@ function renderCalendarEditorSession(session) {
   card.querySelector("[data-drag-handle='move']").addEventListener("pointerdown", (event) => startCalendarDrag(event, session, "move"));
   card.querySelector("[data-drag-handle='resize']").addEventListener("pointerdown", (event) => startCalendarDrag(event, session, "resize"));
   card.addEventListener("dblclick", () => openSessionDialog(session));
+  card.addEventListener("contextmenu", (event) => showSessionContextMenu(event, session));
   return card;
 }
 
@@ -1016,7 +1581,7 @@ function getCalendarDateFromPoint(clientX) {
 }
 
 function handleCalendarStartChange() {
-  calendarEditorStart = clampIsoDate(els.calendarStart.value || PLAN_START, PLAN_START, PLAN_END);
+  calendarEditorStart = clampIsoDate(els.calendarStart.value || PLAN_START, PLAN_START, getScheduleEnd());
   renderCalendarEditor();
 }
 
@@ -1047,14 +1612,16 @@ function renderSession(session) {
   const subject = getSubject(session.subjectId);
   const topic = getTopic(session.subjectId, session.topicId);
   const card = document.createElement("div");
-  card.className = `session${session.complete ? " complete" : ""}`;
+  card.className = `session${session.complete ? " complete" : ""}${session.logged ? " logged" : ""}${isSessionOverdue(session) ? " overdue" : ""}`;
   card.style.setProperty("--subject-color", subject.color);
+  const topicText = session.logged ? getStudyLogSummary(session) : escapeHtml(topic?.title || "Custom topic");
+  const typeText = session.logged ? `Logged study - ${session.timerMinutes || session.duration} min timed` : session.type;
 
   card.innerHTML = `
     <div class="session-time">${session.start}-${session.end} (${session.duration} min)</div>
     <div class="session-subject">${subject.name}</div>
-    <div class="session-topic">${topic?.title || "Custom topic"}</div>
-    <div class="session-type">${session.type}</div>
+    <div class="session-topic">${topicText}</div>
+    <div class="session-type">${typeText}</div>
     ${session.notes ? `<p>${escapeHtml(session.notes)}</p>` : ""}
     <div class="session-actions">
       <label class="check">
@@ -1073,7 +1640,54 @@ function renderSession(session) {
   });
 
   card.querySelector("[data-action='edit']").addEventListener("click", () => openSessionDialog(session));
+  card.addEventListener("contextmenu", (event) => showSessionContextMenu(event, session));
   return card;
+}
+
+function showSessionContextMenu(event, session) {
+  event.preventDefault();
+  event.stopPropagation();
+  hideSessionContextMenu();
+
+  sessionContextMenu = document.createElement("div");
+  sessionContextMenu.className = "session-context-menu";
+  sessionContextMenu.innerHTML = session.logged
+    ? `
+      <button type="button" data-action="edit">Edit study block</button>
+      <button type="button" class="danger" data-action="delete">Delete study block</button>
+    `
+    : `
+      <button type="button" data-action="edit">Edit session</button>
+      <button type="button" class="danger" data-action="delete">Delete session</button>
+    `;
+
+  sessionContextMenu.querySelector("[data-action='edit']").addEventListener("click", () => {
+    hideSessionContextMenu();
+    if (session.logged) {
+      openLoggedStudyEditDialog(session);
+    } else {
+      openSessionDialog(session);
+    }
+  });
+  sessionContextMenu.querySelector("[data-action='delete']").addEventListener("click", () => {
+    if (session.logged) {
+      deleteLoggedStudySession(session);
+    } else {
+      deleteSession(session);
+    }
+  });
+  document.body.append(sessionContextMenu);
+
+  const rect = sessionContextMenu.getBoundingClientRect();
+  const left = Math.min(event.clientX, window.innerWidth - rect.width - 8);
+  const top = Math.min(event.clientY, window.innerHeight - rect.height - 8);
+  sessionContextMenu.style.left = `${Math.max(8, left)}px`;
+  sessionContextMenu.style.top = `${Math.max(8, top)}px`;
+}
+
+function hideSessionContextMenu() {
+  sessionContextMenu?.remove();
+  sessionContextMenu = null;
 }
 
 function renderTopics() {
@@ -1175,7 +1789,8 @@ function renderProgress() {
 function renderGanttChart() {
   if (els.ganttPanel.classList.contains("collapsed")) return;
 
-  const totalDays = daysBetween(PLAN_START, PLAN_END) + 1;
+  const scheduleEnd = getScheduleEnd();
+  const totalDays = daysBetween(PLAN_START, scheduleEnd) + 1;
   const visibleDays = Number(els.ganttRange.value || 14);
   const maxOffset = Math.max(0, totalDays - visibleDays);
   ganttStartOffset = Math.min(ganttStartOffset, maxOffset);
@@ -1236,7 +1851,7 @@ function renderGanttChart() {
 function handleGanttRangeChange() {
   const visibleDays = Number(els.ganttRange.value || 14);
   const todayOffset = Math.max(0, daysBetween(PLAN_START, getStudyTodayIso()));
-  ganttStartOffset = Math.max(0, Math.min(todayOffset, daysBetween(PLAN_START, PLAN_END) + 1 - visibleDays));
+  ganttStartOffset = Math.max(0, Math.min(todayOffset, daysBetween(PLAN_START, getScheduleEnd()) + 1 - visibleDays));
   renderGanttChart();
 }
 
@@ -1318,10 +1933,21 @@ function handleSessionSubmit(event) {
 function deleteCurrentSession() {
   const id = els.sessionId.value;
   if (!id) return;
-  state.sessions = state.sessions.filter((session) => session.id !== id);
+  deleteSessionById(id);
   els.dialog.close();
   markDirtyAndSave();
   render();
+}
+
+function deleteSession(session) {
+  hideSessionContextMenu();
+  deleteSessionById(session.id);
+  markDirtyAndSave();
+  render();
+}
+
+function deleteSessionById(id) {
+  state.sessions = state.sessions.filter((session) => session.id !== id);
 }
 
 function openRestructureDialog() {
@@ -1416,7 +2042,7 @@ function reorganiseCatchUpPlan() {
 
   const completed = state.sessions.filter((session) => session.complete || isProtectedSession(session));
   const futureFlexible = state.sessions
-    .filter((session) => !session.complete && !isProtectedSession(session) && session.date >= todayIso)
+    .filter((session) => !session.complete && !isProtectedSession(session) && !isSessionOverdue(session, state, todayIso) && session.date >= todayIso)
     .sort(compareSessionTime);
 
   if (!futureFlexible.length) {
@@ -1467,6 +2093,12 @@ function reorganiseCatchUpPlan() {
 function regeneratePlan() {
   if (!window.confirm("Regenerate this profile's timetable from the current topics and scheduling rules? Manual session edits may be replaced.")) return;
 
+  regenerateSessionsFromCurrentSubjects();
+  markDirtyAndSave();
+  render();
+}
+
+function regenerateSessionsFromCurrentSubjects() {
   const completedByTopic = new Map();
   state.sessions.forEach((session) => {
     if (session.complete) completedByTopic.set(session.topicId, true);
@@ -1478,14 +2110,19 @@ function regeneratePlan() {
       topic.complete = Boolean(topic.complete || completedByTopic.get(topic.id));
     });
   });
-  markDirtyAndSave();
-  render();
 }
 
 function getMissedSessions(profileState, todayIso) {
   return profileState.sessions
-    .filter((session) => !session.complete && !isProtectedSession(session, profileState) && session.date < todayIso)
+    .filter((session) => isSessionOverdue(session, profileState, todayIso))
     .sort(compareSessionTime);
+}
+
+function isSessionOverdue(session, profileState = state, todayIso = getStudyTodayIso()) {
+  if (session.complete || session.logged || isProtectedSession(session, profileState)) return false;
+  if (session.date < todayIso) return true;
+  if (session.date > todayIso) return false;
+  return getCurrentMinutesForSchedule() > timeToMinutes(session.end);
 }
 
 function isProtectedSession(session, profileState = state) {
@@ -1518,7 +2155,7 @@ function getProfileMetrics(profileState) {
     0,
   );
   const todayIso = getStudyTodayIso();
-  const upcomingSessions = profileState.sessions.filter((session) => !session.complete && session.date >= todayIso).length;
+  const upcomingSessions = profileState.sessions.filter((session) => !session.complete && session.date >= todayIso && !isSessionOverdue(session, profileState, todayIso)).length;
 
   return {
     totalSessions,
@@ -1575,6 +2212,16 @@ function getTopic(subjectId, topicId) {
   return getSubject(subjectId).topics.find((topic) => topic.id === topicId);
 }
 
+function getStudyLogSummary(session) {
+  if (!session.studyLog?.length) return "Logged study session";
+  return session.studyLog
+    .map((entry) => {
+      const topics = (entry.topicTitles || entry.topicIds.map((topicId) => getTopic(entry.subjectId, topicId)?.title || "Custom topic")).join(", ");
+      return `${escapeHtml(entry.subjectName || getSubject(entry.subjectId).name)}: ${escapeHtml(entry.type)} on ${escapeHtml(topics)} (${entry.minutes} min)`;
+    })
+    .join(" | ");
+}
+
 function eachDate(startIso, endIso) {
   const dates = [];
   const current = new Date(`${startIso}T00:00:00`);
@@ -1588,11 +2235,17 @@ function eachDate(startIso, endIso) {
   return dates;
 }
 
+function getScheduleEnd(subjects = state?.subjects) {
+  const examDates = subjects?.map((subject) => subject.examDate).filter(Boolean) || [];
+  return [PLAN_END, ...examDates].sort().at(-1);
+}
+
 function getStudyTodayIso() {
   const today = new Date();
   const todayIso = toIso(today);
+  const scheduleEnd = getScheduleEnd();
   if (todayIso < PLAN_START) return PLAN_START;
-  if (todayIso > PLAN_END) return PLAN_END;
+  if (todayIso > scheduleEnd) return scheduleEnd;
   return todayIso;
 }
 
@@ -1627,6 +2280,15 @@ function minutesBetween(start, end) {
   return timeToMinutes(end) - timeToMinutes(start);
 }
 
+function getCurrentMinutesForSchedule() {
+  const now = new Date();
+  return now.getHours() * 60 + now.getMinutes();
+}
+
+function intervalsOverlap(startA, endA, startB, endB) {
+  return timeToMinutes(startA) < timeToMinutes(endB) && timeToMinutes(startB) < timeToMinutes(endA);
+}
+
 function snapMinutes(minutes) {
   return Math.round(minutes / CALENDAR_STEP_MINUTES) * CALENDAR_STEP_MINUTES;
 }
@@ -1654,6 +2316,14 @@ function formatDate(iso) {
     day: "numeric",
     month: "short",
   });
+}
+
+function formatDuration(ms) {
+  const totalSeconds = Math.floor(ms / 1000);
+  const hours = Math.floor(totalSeconds / 3600);
+  const minutes = Math.floor((totalSeconds % 3600) / 60);
+  const seconds = totalSeconds % 60;
+  return [hours, minutes, seconds].map((part) => String(part).padStart(2, "0")).join(":");
 }
 
 function formatShortDate(iso) {

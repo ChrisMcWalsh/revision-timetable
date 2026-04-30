@@ -21,6 +21,8 @@
   --done-line: #88e0b7;
   --danger: #dc2626;
   --danger-soft: #fee2e2;
+  --overdue-bg: #fff1f2;
+  --overdue-line: #f87171;
   --warning-soft: #fff4e6;
   --warning-ink: #9a3412;
   --success-soft: #e9fbf1;
@@ -54,6 +56,8 @@
   --done-line: #2a8f69;
   --danger: #fb7185;
   --danger-soft: #3a1720;
+  --overdue-bg: #351820;
+  --overdue-line: #fb7185;
   --warning-soft: #392616;
   --warning-ink: #fdba74;
   --success-soft: #123826;
@@ -90,6 +94,10 @@ input,
 select,
 textarea {
   font: inherit;
+}
+
+[hidden] {
+  display: none !important;
 }
 
 button {
@@ -180,6 +188,40 @@ body.tooltip-warm [data-tooltip]::after {
   display: flex;
   align-items: end;
   gap: 12px;
+}
+
+.study-mode {
+  min-width: 230px;
+}
+
+.study-mode > .primary {
+  width: 100%;
+}
+
+.study-active {
+  display: grid;
+  grid-template-columns: 1fr auto auto;
+  align-items: center;
+  gap: 8px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  padding: 4px;
+  background: var(--panel-2);
+}
+
+.study-timer {
+  padding: 0 10px;
+  color: var(--ink);
+  font-variant-numeric: tabular-nums;
+  font-weight: 900;
+}
+
+.study-active button {
+  min-height: 34px;
+  border-radius: 999px;
+  padding: 0 12px;
+  font-size: 0.84rem;
+  font-weight: 800;
 }
 
 .profile-label {
@@ -298,14 +340,72 @@ h2 {
   background: var(--panel-2);
 }
 
-.countdown strong {
+.countdown.editing {
+  background: color-mix(in srgb, var(--subject-color) 10%, var(--panel-2));
+}
+
+.countdown-summary {
+  display: block;
+  width: 100%;
+  min-height: 0;
+  border: 0;
+  border-radius: 8px;
+  padding: 0;
+  background: transparent;
+  color: inherit;
+  text-align: left;
+}
+
+.countdown-summary:hover {
+  border-color: transparent;
+  background: transparent;
+  transform: none;
+}
+
+.countdown-summary strong {
   display: block;
   margin-bottom: 3px;
 }
 
-.countdown span {
+.countdown-summary span {
   color: var(--muted);
   font-size: 0.9rem;
+}
+
+.exam-editor {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 86px;
+  gap: 8px;
+  margin-top: 12px;
+}
+
+.exam-editor.hidden {
+  display: none;
+}
+
+.exam-editor label {
+  gap: 5px;
+  font-size: 0.72rem;
+}
+
+.exam-editor input {
+  min-height: 36px;
+  padding: 8px;
+  font-size: 0.82rem;
+}
+
+.exam-editor button {
+  min-height: 34px;
+  font-size: 0.82rem;
+  font-weight: 800;
+}
+
+.exam-editor button[type="submit"] {
+  grid-column: 1;
+}
+
+.exam-editor-cancel {
+  grid-column: 2;
 }
 
 .control-grid {
@@ -536,6 +636,55 @@ textarea {
   background: var(--done-bg);
 }
 
+.calendar-edit-session.overdue {
+  border-color: var(--overdue-line);
+  border-left-color: var(--danger);
+  background: var(--overdue-bg);
+}
+
+.calendar-edit-session.logged {
+  cursor: context-menu;
+}
+
+.calendar-edit-session.compare-left {
+  left: 3px;
+  right: calc(50% + 3px);
+}
+
+.calendar-edit-session.compare-right {
+  left: calc(50% + 3px);
+  right: 3px;
+}
+
+.calendar-editor.range-week .calendar-edit-session.compare-left {
+  left: 2px;
+  right: calc(50% + 2px);
+}
+
+.calendar-editor.range-week .calendar-edit-session.compare-right {
+  left: calc(50% + 2px);
+  right: 2px;
+}
+
+.calendar-editor.range-fortnight .calendar-edit-session.compare-left {
+  left: 1px;
+  right: calc(50% + 1px);
+}
+
+.calendar-editor.range-fortnight .calendar-edit-session.compare-right {
+  left: calc(50% + 1px);
+  right: 1px;
+}
+
+.calendar-edit-session.displaced {
+  border-left-color: var(--danger);
+}
+
+.calendar-edit-session.displaced .calendar-session-body strong {
+  text-decoration: line-through;
+  text-decoration-thickness: 2px;
+}
+
 .calendar-edit-session.dragging {
   z-index: 5;
   opacity: 0.88;
@@ -559,8 +708,9 @@ textarea {
 .calendar-session-body span {
   display: block;
   overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  white-space: normal;
+  overflow-wrap: anywhere;
+  line-height: 1.2;
 }
 
 .calendar-session-body strong {
@@ -653,6 +803,23 @@ textarea {
   border-color: var(--done-line);
   border-top-color: var(--done);
   background: var(--done-bg);
+}
+
+.session.overdue {
+  border-color: var(--overdue-line);
+  border-top-color: var(--danger);
+  background: var(--overdue-bg);
+}
+
+.session.logged {
+  border-style: solid;
+  cursor: context-menu;
+}
+
+.session,
+.mini-session,
+.calendar-edit-session {
+  cursor: context-menu;
 }
 
 .session-time {
@@ -791,6 +958,30 @@ textarea {
   gap: 10px;
 }
 
+.today-overlap-group {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: 10px;
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  padding: 10px;
+  background: var(--panel-2);
+}
+
+.overlap-column {
+  display: grid;
+  align-content: start;
+  gap: 8px;
+  min-width: 0;
+}
+
+.overlap-label {
+  color: var(--muted);
+  font-size: 0.76rem;
+  font-weight: 900;
+  text-transform: uppercase;
+}
+
 .mini-session,
 .leaderboard-row,
 .focus-row {
@@ -801,16 +992,88 @@ textarea {
   background: var(--panel-2);
 }
 
+.mini-session {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 10px;
+}
+
 .mini-session.complete {
   border-color: var(--done-line);
   border-left-color: var(--done);
   background: var(--done-bg);
 }
 
+.mini-session.overdue {
+  border-color: var(--overdue-line);
+  border-left-color: var(--danger);
+  background: var(--overdue-bg);
+}
+
+.mini-session.logged {
+  background: var(--done-bg);
+  cursor: context-menu;
+}
+
+.mini-session.displaced {
+  border-left-color: var(--danger);
+}
+
+.mini-session.displaced strong {
+  text-decoration: line-through;
+  text-decoration-thickness: 2px;
+}
+
+.session-context-menu {
+  position: fixed;
+  z-index: 40;
+  display: grid;
+  gap: 4px;
+  min-width: 170px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  padding: 6px;
+  background: var(--panel);
+  box-shadow: var(--shadow);
+}
+
+.session-context-menu button {
+  min-height: 34px;
+  border: 0;
+  border-radius: 8px;
+  padding: 0 10px;
+  background: transparent;
+  text-align: left;
+  font-size: 0.84rem;
+}
+
+.session-context-menu button:hover {
+  background: var(--panel-2);
+  transform: none;
+}
+
 .mini-session strong,
 .focus-row strong {
   display: block;
   margin-bottom: 4px;
+}
+
+.mini-session-check {
+  display: inline-flex;
+  grid-auto-flow: column;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  color: var(--muted);
+  font-size: 0.82rem;
+  font-weight: 800;
+}
+
+.mini-session-check input {
+  width: 22px;
+  height: 22px;
+  padding: 0;
 }
 
 .mini-session span,
@@ -1132,12 +1395,17 @@ textarea {
 
 dialog {
   width: min(720px, calc(100vw - 28px));
+  max-height: calc(100vh - 28px);
   border: 0;
   border-radius: 16px;
   padding: 0;
   background: var(--panel);
   color: var(--ink);
   box-shadow: 0 24px 80px rgba(0, 0, 0, 0.24);
+}
+
+#studyDialog {
+  width: min(920px, calc(100vw - 28px));
 }
 
 dialog::backdrop {
@@ -1147,6 +1415,9 @@ dialog::backdrop {
 .dialog-card {
   display: grid;
   gap: 16px;
+  max-height: calc(100vh - 28px);
+  overflow-y: auto;
+  overflow-x: hidden;
   padding: 18px;
 }
 
@@ -1183,6 +1454,110 @@ dialog::backdrop {
   gap: 12px;
 }
 
+.study-dialog-card {
+  width: 100%;
+  max-width: 100%;
+}
+
+.study-time-row {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 220px));
+  gap: 12px;
+}
+
+.time-pair {
+  display: grid;
+  grid-template-columns: 54px auto 54px;
+  align-items: center;
+  gap: 6px;
+  width: max-content;
+}
+
+.time-pair input {
+  min-height: 42px;
+  padding: 8px;
+  text-align: center;
+  font-variant-numeric: tabular-nums;
+}
+
+.time-pair span {
+  color: var(--muted);
+  font-weight: 900;
+}
+
+.study-log-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  width: 100%;
+}
+
+.study-log-head h3 {
+  margin: 0;
+}
+
+.study-entry-list {
+  display: grid;
+  gap: 10px;
+  width: 100%;
+  justify-items: stretch;
+}
+
+.study-entry {
+  display: grid;
+  grid-template-columns: 1fr;
+  align-items: stretch;
+  gap: 12px;
+  width: 100%;
+  min-width: 0;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  padding: 14px;
+  background: var(--panel-2);
+}
+
+.study-entry label {
+  width: 100%;
+}
+
+.study-entry label,
+.study-entry select,
+.study-entry input {
+  min-width: 0;
+}
+
+.study-entry select[multiple] {
+  min-height: 132px;
+}
+
+.study-entry-remove {
+  min-height: 40px;
+  justify-self: end;
+  padding: 0 14px;
+}
+
+.study-dialog-actions {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  align-items: center;
+  gap: 12px;
+}
+
+.study-dialog-actions > #studySubmitState {
+  grid-column: 1 / -1;
+}
+
+.study-dialog-actions-left {
+  display: flex;
+  gap: 10px;
+  justify-self: start;
+}
+
+.study-dialog-actions > .primary {
+  justify-self: end;
+}
+
 .dialog-actions {
   grid-template-columns: auto 1fr auto auto;
 }
@@ -1208,6 +1583,10 @@ dialog::backdrop {
   .progress-grid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
+
+  .study-entry-remove {
+    width: 100%;
+  }
 }
 
 @media (max-width: 680px) {
@@ -1221,15 +1600,26 @@ dialog::backdrop {
     align-items: stretch;
   }
 
+  .study-mode {
+    min-width: 100%;
+  }
+
   .sidebar,
   .sessions,
   .dashboard-grid,
+  .today-overlap-group,
   .calendar-editor-controls,
   .kpi-grid,
   .topic-grid,
   .progress-grid,
-  .form-grid {
+  .form-grid,
+  .study-time-row,
+  .study-entry {
     grid-template-columns: 1fr;
+  }
+
+  .study-entry-remove {
+    width: 100%;
   }
 
   .today-card {
@@ -1258,5 +1648,18 @@ dialog::backdrop {
 
   .dialog-actions {
     grid-template-columns: 1fr;
+  }
+
+  .study-dialog-actions {
+    grid-template-columns: 1fr;
+  }
+
+  .study-dialog-actions-left {
+    flex-direction: column;
+  }
+
+  .study-dialog-actions-left,
+  .study-dialog-actions > .primary {
+    width: 100%;
   }
 }
