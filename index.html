@@ -1,0 +1,264 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Revision Timetable</title>
+    <link rel="icon" href="favicon.svg" type="image/svg+xml" />
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <header class="app-header">
+      <div>
+        <p class="eyebrow">30 Apr - 4 Jun 2026</p>
+        <h1>Revision timetable</h1>
+      </div>
+      <div class="header-tools">
+        <div class="theme-toggle" role="group" aria-label="Theme">
+          <button class="theme-btn active" id="lightThemeBtn" type="button">Light</button>
+          <button class="theme-btn" id="darkThemeBtn" type="button">Dark</button>
+        </div>
+        <label class="profile-label" for="profileSelect">
+          Profile
+          <select id="profileSelect"></select>
+        </label>
+        <div class="save-state" id="saveState">Saved locally</div>
+      </div>
+    </header>
+
+    <main class="layout">
+      <aside class="sidebar" aria-label="Revision overview">
+        <section class="panel">
+          <h2>Exam countdown</h2>
+          <div class="countdowns" id="countdowns"></div>
+        </section>
+
+        <section class="panel">
+          <h2>Controls</h2>
+          <div class="control-grid">
+            <button class="primary" id="addSessionBtn" type="button" data-tooltip="Create a new custom revision session and choose its subject, topic, date, time, and duration.">+ Add session</button>
+            <button id="catchUpBtn" type="button" data-tooltip="Move unfinished past sessions into future available blocks so you can catch up without losing completed work.">Catch up plan</button>
+            <button id="restructureBtn" type="button" data-tooltip="Write a timetable-only restructure request for Codex, scoped to modules, topics, and sessions.">Restructure</button>
+            <button id="regenerateBtn" type="button" data-tooltip="Rebuild the timetable from your current topic list, exam dates, credits, and scheduling rules.">Regenerate</button>
+            <button id="resetBtn" type="button" data-tooltip="Reset this profile's timetable, topic progress, and session edits back to the original generated plan.">Reset all</button>
+          </div>
+        </section>
+      </aside>
+
+      <section class="workspace">
+        <nav class="tabs" aria-label="App views">
+          <button class="tab active" data-view="dashboard" type="button">Dashboard</button>
+          <button class="tab" data-view="timetable" type="button">Timetable</button>
+          <button class="tab" data-view="calendarEditor" type="button">Calendar</button>
+          <button class="tab" data-view="topics" type="button">Topics</button>
+          <button class="tab" data-view="progress" type="button">Progress</button>
+        </nav>
+
+        <section class="view active" id="dashboardView">
+          <div class="toolbar">
+            <div>
+              <h2>Dashboard</h2>
+              <p>Your study day, progress, and leaderboard at a glance.</p>
+            </div>
+          </div>
+          <div class="dashboard-grid">
+            <section class="dashboard-card today-card">
+              <h3>Today</h3>
+              <div id="todaySummary"></div>
+              <div class="today-list" id="todayList"></div>
+            </section>
+            <section class="dashboard-card">
+              <h3>Your progress</h3>
+              <div id="dashboardProgress"></div>
+            </section>
+            <section class="dashboard-card">
+              <h3>Leaderboard</h3>
+              <div id="profileComparison"></div>
+            </section>
+            <section class="dashboard-card">
+              <h3>Focus next</h3>
+              <div id="focusNext"></div>
+            </section>
+          </div>
+        </section>
+
+        <section class="view" id="timetableView">
+          <div class="toolbar">
+            <div>
+              <h2>Daily plan</h2>
+              <p>Four focused blocks, Sundays off, light review around exams.</p>
+            </div>
+            <label class="filter-label" for="subjectFilter">
+              Filter
+              <select id="subjectFilter">
+                <option value="all">All subjects</option>
+              </select>
+            </label>
+          </div>
+          <div class="calendar" id="calendar"></div>
+        </section>
+
+        <section class="view" id="calendarEditorView">
+          <div class="toolbar">
+            <div>
+              <h2>Calendar editor</h2>
+              <p>Drag the middle of a session to move it, or drag the bottom edge to change its length.</p>
+            </div>
+            <div class="calendar-editor-controls">
+              <button class="calendar-nav-btn" id="calendarPrevBtn" type="button" aria-label="Previous calendar range">&lt;</button>
+              <label class="filter-label" for="calendarRange">
+                View
+                <select id="calendarRange">
+                  <option value="1">1 day</option>
+                  <option value="7" selected>7 days</option>
+                  <option value="14">2 weeks</option>
+                </select>
+              </label>
+              <label class="filter-label" for="calendarStart">
+                Start
+                <input id="calendarStart" type="date" min="2026-04-30" max="2026-06-04" />
+              </label>
+              <button class="calendar-nav-btn" id="calendarNextBtn" type="button" aria-label="Next calendar range">&gt;</button>
+            </div>
+          </div>
+          <div class="calendar-editor" id="calendarEditor"></div>
+        </section>
+
+        <section class="view" id="topicsView">
+          <div class="toolbar">
+            <div>
+              <h2>Module topics</h2>
+              <p>Edit your topic list, then regenerate when you want a fresh plan.</p>
+            </div>
+          </div>
+          <div class="topic-grid" id="topicGrid"></div>
+        </section>
+
+        <section class="view" id="progressView">
+          <div class="toolbar">
+            <div>
+              <h2>Progress</h2>
+              <p>Timeline progress by date, plus subject and topic completion.</p>
+            </div>
+            <label class="filter-label" for="ganttRange">
+              View
+              <select id="ganttRange">
+                <option value="7">7 days</option>
+                <option value="14" selected>14 days</option>
+                <option value="31">1 month</option>
+              </select>
+            </label>
+          </div>
+          <section class="gantt-panel collapsed" id="ganttPanel">
+            <button class="gantt-toggle" id="ganttToggle" type="button" aria-expanded="false">
+              <span>Revision Gantt</span>
+              <span id="ganttToggleText">Show chart</span>
+            </button>
+            <div class="gantt-content" id="ganttContent">
+              <div class="gantt-head">
+                <div>
+                  <h3>Revision Gantt</h3>
+                  <p id="ganttWindowLabel"></p>
+                </div>
+                <div class="gantt-legend">
+                  <span><i class="legend-done"></i> Complete</span>
+                  <span><i class="legend-planned"></i> Planned</span>
+                </div>
+              </div>
+              <div class="gantt-chart" id="ganttChart"></div>
+            </div>
+          </section>
+          <div class="progress-grid" id="progressGrid"></div>
+        </section>
+      </section>
+    </main>
+
+    <dialog id="sessionDialog">
+      <form method="dialog" class="dialog-card" id="sessionForm">
+        <div class="dialog-head">
+          <h2 id="dialogTitle">Edit session</h2>
+          <button class="icon-btn" id="closeDialogBtn" value="cancel" type="submit" aria-label="Close">x</button>
+        </div>
+
+        <input type="hidden" id="sessionId" />
+
+        <div class="form-grid">
+          <label>
+            Date
+            <input id="sessionDate" type="date" min="2026-04-30" max="2026-06-04" required />
+          </label>
+          <label>
+            Time
+            <select id="sessionTime" required></select>
+          </label>
+          <label>
+            Subject
+            <select id="sessionSubject" required></select>
+          </label>
+          <label>
+            Topic
+            <select id="sessionTopic" required></select>
+          </label>
+          <label>
+            Type
+            <select id="sessionType" required></select>
+          </label>
+          <label>
+            Duration
+            <select id="sessionDuration" required>
+              <option value="30">30 min</option>
+              <option value="60">60 min</option>
+              <option value="90">90 min</option>
+              <option value="120">120 min</option>
+            </select>
+          </label>
+        </div>
+
+        <label>
+          Notes
+          <textarea id="sessionNotes" rows="3" placeholder="Optional plan, resources, or reminder"></textarea>
+        </label>
+
+        <div class="dialog-actions">
+          <button id="deleteSessionBtn" class="danger" type="button">Delete</button>
+          <span></span>
+          <button value="cancel" type="submit">Cancel</button>
+          <button class="primary" id="saveSessionBtn" value="default" type="submit">Save</button>
+        </div>
+      </form>
+    </dialog>
+
+    <dialog id="restructureDialog">
+      <form method="dialog" class="dialog-card" id="restructureForm">
+        <div class="dialog-head">
+          <h2>Restructure request</h2>
+          <button class="icon-btn" value="cancel" type="submit" aria-label="Close">x</button>
+        </div>
+
+        <p class="dialog-note">Describe timetable, module, topic, or session changes only. Website layout, styling, and interface changes are intentionally out of scope here.</p>
+
+        <label>
+          What should change?
+          <textarea id="restructureText" rows="6" placeholder="Example: Move CFD practice earlier, keep Sundays free, and add more active recall in the week before Systems Engineering."></textarea>
+        </label>
+
+        <div class="scope-warning" id="restructureWarning" hidden></div>
+
+        <label>
+          Request to send to Codex
+          <textarea id="restructurePrompt" rows="7" readonly></textarea>
+        </label>
+
+        <div class="dialog-actions">
+          <span id="copyRestructureState"></span>
+          <span></span>
+          <button value="cancel" type="submit">Close</button>
+          <button class="primary" id="copyRestructureBtn" type="button">Copy request</button>
+        </div>
+      </form>
+    </dialog>
+
+    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+    <script src="app.js"></script>
+  </body>
+</html>
