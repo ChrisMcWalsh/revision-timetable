@@ -1,5 +1,6 @@
 const STORAGE_KEY = "revision-timetable-v1";
 const THEME_KEY = "revision-timetable-theme";
+const STUDY_TIMER_KEY = "revision-timetable-study-timer";
 const SUPABASE_URL = "https://rtzlegjqfznyckngsyzq.supabase.co";
 const SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InJ0emxlZ2pxZnpueWNrbmdzeXpxIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Nzc1NDA3NTQsImV4cCI6MjA5MzExNjc1NH0.s_ougifMkTuTcza8XTtizJEG_c6Qbd6gG3X8paUSlJ0";
 const SUPABASE_TABLE = "revision_profiles";
@@ -230,9 +231,11 @@ const els = {
 };
 
 initialiseControls();
+restoreStudyTimer();
 applyTheme(loadTheme());
 render();
 initialiseSupabaseSync();
+window.addEventListener("beforeunload", persistStudyTimer);
 
 function makeDefaultState(profileId = "default") {
   const subjects = getDefaultSubjectsForProfile(profileId).map((subject) => ({
@@ -342,6 +345,7 @@ async function initialiseSupabaseSync() {
   remoteSyncTimer = window.setInterval(pullRemoteProfiles, 8000);
   window.addEventListener("beforeunload", () => {
     if (remoteSyncTimer) window.clearInterval(remoteSyncTimer);
+    persistStudyTimer();
   });
 }
 
@@ -546,6 +550,7 @@ function startStudyMode() {
   els.studyStartBtn.hidden = true;
   els.studyActive.hidden = false;
   els.studyPauseBtn.textContent = "Pause";
+  persistStudyTimer();
   updateStudyTimerDisplay();
 }
 
@@ -565,6 +570,7 @@ function toggleStudyPause() {
     els.studyPauseBtn.textContent = "Resume";
   }
 
+  persistStudyTimer();
   updateStudyTimerDisplay();
 }
 
@@ -858,6 +864,7 @@ function stopStudyMode() {
   els.studyActive.hidden = true;
   els.studyTimer.textContent = "00:00:00";
   els.studyPauseBtn.textContent = "Pause";
+  clearPersistedStudyTimer();
 }
 
 function updateStudyTimerDisplay() {
@@ -868,6 +875,55 @@ function getStudyElapsedMs() {
   if (!studyTimer.active) return 0;
   const end = studyTimer.paused ? studyTimer.pausedAt : Date.now();
   return Math.max(0, end - studyTimer.startedAt - studyTimer.elapsedPausedMs);
+}
+
+function restoreStudyTimer() {
+  const stored = sessionStorage.getItem(STUDY_TIMER_KEY);
+  if (!stored) return;
+
+  try {
+    const parsed = JSON.parse(stored);
+    if (!parsed.active || !parsed.startedAt) {
+      clearPersistedStudyTimer();
+      return;
+    }
+
+    studyTimer = {
+      active: true,
+      paused: Boolean(parsed.paused),
+      startedAt: Number(parsed.startedAt),
+      pausedAt: parsed.paused ? Number(parsed.pausedAt || Date.now()) : null,
+      elapsedPausedMs: Number(parsed.elapsedPausedMs || 0),
+      intervalId: null,
+    };
+
+    els.studyStartBtn.hidden = true;
+    els.studyActive.hidden = false;
+    els.studyPauseBtn.textContent = studyTimer.paused ? "Resume" : "Pause";
+    if (!studyTimer.paused) studyTimer.intervalId = window.setInterval(updateStudyTimerDisplay, 1000);
+    updateStudyTimerDisplay();
+  } catch {
+    clearPersistedStudyTimer();
+  }
+}
+
+function persistStudyTimer() {
+  if (!studyTimer.active) {
+    clearPersistedStudyTimer();
+    return;
+  }
+
+  sessionStorage.setItem(STUDY_TIMER_KEY, JSON.stringify({
+    active: studyTimer.active,
+    paused: studyTimer.paused,
+    startedAt: studyTimer.startedAt,
+    pausedAt: studyTimer.pausedAt,
+    elapsedPausedMs: studyTimer.elapsedPausedMs,
+  }));
+}
+
+function clearPersistedStudyTimer() {
+  sessionStorage.removeItem(STUDY_TIMER_KEY);
 }
 
 function setStudyTimeFields(startedAt, endedAt) {
