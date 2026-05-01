@@ -196,6 +196,7 @@ const els = {
   tabs: document.querySelectorAll(".tab"),
   views: document.querySelectorAll(".view"),
   addSessionBtn: document.querySelector("#addSessionBtn"),
+  addModuleBtn: document.querySelector("#addModuleBtn"),
   catchUpBtn: document.querySelector("#catchUpBtn"),
   restructureBtn: document.querySelector("#restructureBtn"),
   regenerateBtn: document.querySelector("#regenerateBtn"),
@@ -246,6 +247,7 @@ function makeDefaultState(profileId = "default") {
       id: `${subject.id}-topic-${index + 1}`,
       title,
       complete: false,
+      progress: makeEmptyTopicProgress(),
     })),
   }));
 
@@ -305,6 +307,9 @@ function normaliseProfileState(profileState, profileId = "default") {
   if (!profileState?.subjects || !profileState?.sessions) return makeDefaultState(profileId);
   profileState.subjects.forEach((subject) => {
     subject.examTime = subject.examTime || "09:00";
+    subject.shortName = subject.shortName || makeShortName(subject.name);
+    subject.color = subject.color || pickModuleColor(0);
+    subject.topics.forEach((topic) => normaliseTopicProgress(topic));
   });
   if (profileState.scheduleVersion !== SCHEDULE_VERSION) {
     return {
@@ -454,6 +459,7 @@ function initialiseControls() {
   els.calendarNextBtn.addEventListener("click", () => shiftCalendarEditor(1));
   els.subjectFilter.addEventListener("change", renderCalendar);
   els.addSessionBtn.addEventListener("click", () => openSessionDialog());
+  els.addModuleBtn.addEventListener("click", addModule);
   els.catchUpBtn.addEventListener("click", reorganiseCatchUpPlan);
   els.restructureBtn.addEventListener("click", openRestructureDialog);
   els.restructureText.addEventListener("input", updateRestructurePrompt);
@@ -800,7 +806,8 @@ function markStudyTopicsComplete(entries) {
   entries.forEach((entry) => {
     entry.topicIds.forEach((topicId) => {
       const topic = getTopic(entry.subjectId, topicId);
-      if (topic) topic.complete = true;
+      if (!topic) return;
+      markTopicStageComplete(topic, entry.type);
     });
   });
 }
@@ -846,7 +853,19 @@ function refreshTopicCompletionForKeys(keys) {
     const [subjectId, topicId] = key.split(":");
     const topic = getTopic(subjectId, topicId);
     if (!topic) return;
-    topic.complete = state.sessions.some((session) => session.complete && sessionCoversTopic(session, subjectId, topicId));
+    topic.progress = makeEmptyTopicProgress();
+    state.sessions
+      .filter((session) => session.complete && sessionCoversTopic(session, subjectId, topicId))
+      .forEach((session) => {
+        if (session.studyLog?.length) {
+          session.studyLog
+            .filter((entry) => entry.subjectId === subjectId && entry.topicIds.includes(topicId))
+            .forEach((entry) => markTopicStageComplete(topic, entry.type));
+        } else {
+          markTopicStageComplete(topic, session.type);
+        }
+      });
+    syncTopicCompletion(topic);
   });
 }
 
@@ -1787,7 +1806,34 @@ function renderTopics() {
     const card = document.createElement("article");
     card.className = "subject-card";
     card.style.setProperty("--subject-color", subject.color);
-    card.innerHTML = `<h3>${subject.name}</h3>`;
+    card.innerHTML = `
+      <div class="subject-card-head">
+        <input class="module-name-input" type="text" value="${escapeAttr(subject.name)}" aria-label="Module name">
+        <button class="danger module-delete-btn" type="button" aria-label="Delete module">x</button>
+      </div>
+    `;
+
+    card.querySelector(".module-name-input").addEventListener("change", (event) => {
+      const name = event.target.value.trim();
+      if (!name) {
+        event.target.value = subject.name;
+        return;
+      }
+      subject.name = name;
+      subject.shortName = makeShortName(name);
+      renderSubjectControls();
+      markDirtyAndSave();
+      render();
+    });
+
+    card.querySelector(".module-delete-btn").addEventListener("click", () => {
+      if (!window.confirm(`Delete ${subject.name} and all of its sessions?`)) return;
+      state.subjects = state.subjects.filter((item) => item.id !== subject.id);
+      state.sessions = state.sessions.filter((session) => session.subjectId !== subject.id);
+      renderSubjectControls();
+      markDirtyAndSave();
+      render();
+    });
 
     const list = document.createElement("div");
     list.className = "topic-list";
@@ -1795,15 +1841,9 @@ function renderTopics() {
       const row = document.createElement("div");
       row.className = "topic-row";
       row.innerHTML = `
-        <input type="checkbox" ${topic.complete ? "checked" : ""} aria-label="Mark ${escapeAttr(topic.title)} complete" />
         <input type="text" value="${escapeAttr(topic.title)}" />
         <button type="button" aria-label="Delete topic">x</button>
       `;
-      row.querySelector("input[type='checkbox']").addEventListener("change", (event) => {
-        topic.complete = event.target.checked;
-        markDirtyAndSave();
-        renderProgress();
-      });
       row.querySelector("input[type='text']").addEventListener("change", (event) => {
         topic.title = event.target.value.trim() || topic.title;
         markDirtyAndSave();
@@ -1828,7 +1868,7 @@ function renderTopics() {
       const input = add.querySelector("input");
       const title = input.value.trim();
       if (!title) return;
-      subject.topics.push({ id: makeId(), title, complete: false });
+      subject.topics.push({ id: makeId(), title, complete: false, progress: makeEmptyTopicProgress() });
       input.value = "";
       markDirtyAndSave();
       render();
@@ -1837,6 +1877,49 @@ function renderTopics() {
     card.append(list, add);
     els.topicGrid.append(card);
   });
+}
+
+function addModule() {
+  const name = window.prompt("Module name");
+  if (!name?.trim()) return;
+  const cleanName = name.trim();
+  const id = makeModuleId(cleanName);
+  state.subjects.push({
+    id,
+    name: cleanName,
+    shortName: makeShortName(cleanName),
+    credits: 5,
+    color: pickModuleColor(state.subjects.length),
+    examDate: getScheduleEnd(),
+    examTime: "09:00",
+    topics: [],
+  });
+  renderSubjectControls();
+  markDirtyAndSave();
+  render();
+}
+
+function makeModuleId(name) {
+  const base = name.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/(^-|-$)/g, "") || "module";
+  let id = base;
+  let index = 2;
+  while (state.subjects.some((subject) => subject.id === id)) {
+    id = `${base}-${index}`;
+    index += 1;
+  }
+  return id;
+}
+
+function makeShortName(name) {
+  const words = name.trim().split(/\s+/).filter(Boolean);
+  if (!words.length) return "MOD";
+  const initials = words.map((word) => word[0]).join("").slice(0, 4).toUpperCase();
+  return initials.length > 1 ? initials : words[0].slice(0, 4).toUpperCase();
+}
+
+function pickModuleColor(index) {
+  const colors = ["#0f766e", "#7c3aed", "#c2410c", "#2563eb", "#be123c", "#047857", "#9333ea", "#0891b2"];
+  return colors[index % colors.length];
 }
 
 function renderProgress() {
@@ -1866,14 +1949,50 @@ function renderProgress() {
     subject.topics.forEach((topic) => {
       const related = sessions.filter((session) => session.topicId === topic.id);
       const done = related.filter((session) => session.complete).length;
+      const progress = normaliseTopicProgress(topic);
+      const stageDone = Object.values(progress).filter(Boolean).length;
       const line = document.createElement("div");
-      line.className = "stat-line";
-      line.innerHTML = `<span>${escapeHtml(topic.title)}</span><strong>${done}/${related.length}</strong>`;
+      line.className = "topic-progress-row";
+      line.innerHTML = `
+        <button class="topic-progress-toggle" type="button" aria-expanded="false">
+          <span>${escapeHtml(topic.title)}</span>
+          <strong>${stageDone}/3</strong>
+        </button>
+        <div class="topic-progress-branch" hidden>
+          ${renderProgressStageCheckbox(topic, "study", "Topic study")}
+          ${renderProgressStageCheckbox(topic, "recall", "Recall")}
+          ${renderProgressStageCheckbox(topic, "practice", "Practice questions")}
+        </div>
+      `;
+      const toggle = line.querySelector(".topic-progress-toggle");
+      const branch = line.querySelector(".topic-progress-branch");
+      toggle.addEventListener("click", () => {
+        const isOpen = !branch.hidden;
+        branch.hidden = isOpen;
+        toggle.setAttribute("aria-expanded", String(!isOpen));
+      });
+      line.querySelectorAll("input[type='checkbox']").forEach((checkbox) => {
+        checkbox.addEventListener("change", () => {
+          topic.progress[checkbox.dataset.stage] = checkbox.checked;
+          syncTopicCompletion(topic);
+          markDirtyAndSave();
+          render();
+        });
+      });
       topicProgress.append(line);
     });
 
     els.progressGrid.append(card);
   });
+}
+
+function renderProgressStageCheckbox(topic, stage, label) {
+  return `
+    <label class="progress-stage-check">
+      <input type="checkbox" data-stage="${stage}" ${topic.progress?.[stage] ? "checked" : ""}>
+      <span>${label}</span>
+    </label>
+  `;
 }
 
 function renderGanttChart() {
@@ -2290,8 +2409,9 @@ function resetAll() {
 function updateTopicCompletionFromSessions(session) {
   const topic = getTopic(session.subjectId, session.topicId);
   if (!topic) return;
-  const related = state.sessions.filter((item) => item.topicId === topic.id);
-  topic.complete = related.length > 0 && related.every((item) => item.complete);
+  if (session.complete) markTopicStageComplete(topic, session.type);
+  if (!session.complete) refreshTopicCompletionForKeys([`${session.subjectId}:${session.topicId}`]);
+  syncTopicCompletion(topic);
 }
 
 function getSubject(subjectId) {
@@ -2310,6 +2430,40 @@ function getStudyLogSummary(session) {
       return `${escapeHtml(entry.subjectName || getSubject(entry.subjectId).name)}: ${escapeHtml(entry.type)} on ${escapeHtml(topics)} (${entry.minutes} min)`;
     })
     .join(" | ");
+}
+
+function makeEmptyTopicProgress() {
+  return { study: false, recall: false, practice: false };
+}
+
+function normaliseTopicProgress(topic) {
+  const current = topic.progress || {};
+  topic.progress = {
+    study: Boolean(current.study || topic.complete),
+    recall: Boolean(current.recall || topic.complete),
+    practice: Boolean(current.practice || topic.complete),
+  };
+  syncTopicCompletion(topic);
+  return topic.progress;
+}
+
+function syncTopicCompletion(topic) {
+  const progress = topic.progress || makeEmptyTopicProgress();
+  topic.complete = Boolean(progress.study && progress.recall && progress.practice);
+}
+
+function markTopicStageComplete(topic, sessionType) {
+  const progress = normaliseTopicProgress(topic);
+  const stage = getTopicProgressStage(sessionType);
+  if (stage) progress[stage] = true;
+  syncTopicCompletion(topic);
+}
+
+function getTopicProgressStage(sessionType) {
+  if (sessionType === "Topic study") return "study";
+  if (sessionType === "Active recall" || sessionType === "Light review") return "recall";
+  if (sessionType === "Practice questions" || sessionType === "Past-paper practice") return "practice";
+  return null;
 }
 
 function eachDate(startIso, endIso) {

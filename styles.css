@@ -1140,18 +1140,44 @@ textarea {
 
 .topic-row {
   display: grid;
-  grid-template-columns: auto 1fr auto;
+  grid-template-columns: 1fr auto;
   align-items: center;
   gap: 8px;
 }
 
-.topic-row input[type="checkbox"] {
-  width: 16px;
-  height: 16px;
-}
-
 .topic-row input[type="text"] {
   min-width: 0;
+}
+
+.subject-card-head {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 10px;
+  border-left: 5px solid var(--subject-color);
+  margin-bottom: 12px;
+  padding-left: 10px;
+}
+
+.module-name-input {
+  border: 0;
+  border-radius: 0;
+  padding: 0;
+  background: transparent;
+  color: var(--ink);
+  font-size: 1.02rem;
+  font-weight: 900;
+}
+
+.module-name-input:focus {
+  border-radius: 8px;
+  padding: 8px;
+  background: var(--input-bg);
+}
+
+.module-delete-btn {
+  width: 38px;
+  padding: 0;
 }
 
 .topic-row button,
@@ -1192,6 +1218,57 @@ textarea {
   display: grid;
   gap: 8px;
   margin-top: 14px;
+}
+
+.topic-progress-row {
+  display: grid;
+  gap: 8px;
+}
+
+.topic-progress-toggle {
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+  min-height: 38px;
+  border: 0;
+  border-radius: 8px;
+  padding: 8px 0;
+  background: transparent;
+  color: var(--muted);
+  text-align: left;
+}
+
+.topic-progress-toggle:hover {
+  background: var(--panel-2);
+  transform: none;
+}
+
+.topic-progress-toggle span {
+  overflow-wrap: anywhere;
+}
+
+.topic-progress-branch {
+  display: grid;
+  gap: 8px;
+  border-left: 2px solid var(--line);
+  margin-left: 8px;
+  padding-left: 12px;
+}
+
+.progress-stage-check {
+  display: flex;
+  grid-template-columns: auto 1fr;
+  align-items: center;
+  gap: 8px;
+  color: var(--muted);
+  font-size: 0.86rem;
+  font-weight: 800;
+}
+
+.progress-stage-check input {
+  width: 18px;
+  height: 18px;
+  padding: 0;
 }
 
 .gantt-panel {
