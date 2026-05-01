@@ -151,6 +151,8 @@ let isApplyingRemoteState = false;
 let openExamEditorSubjectId = null;
 let editingStudySessionId = null;
 let sessionContextMenu = null;
+let studyTimerSecondsHidden = false;
+let studyTimerHoverTimeout = null;
 let studyTimer = {
   active: false,
   paused: false,
@@ -458,6 +460,8 @@ function initialiseControls() {
   els.copyRestructureBtn.addEventListener("click", copyRestructurePrompt);
   els.regenerateBtn.addEventListener("click", regeneratePlan);
   els.resetBtn.addEventListener("click", resetAll);
+  document.body.addEventListener("pointerenter", handleAppPointerEnter);
+  document.body.addEventListener("pointerleave", handleAppPointerLeave);
   els.sessionSubject.addEventListener("change", () => populateTopicSelect(els.sessionSubject.value));
   els.sessionForm.addEventListener("submit", handleSessionSubmit);
   els.deleteSessionBtn.addEventListener("click", deleteCurrentSession);
@@ -545,11 +549,12 @@ function startStudyMode() {
     startedAt: now,
     pausedAt: null,
     elapsedPausedMs: 0,
-    intervalId: window.setInterval(updateStudyTimerDisplay, 1000),
+    intervalId: null,
   };
   els.studyStartBtn.hidden = true;
   els.studyActive.hidden = false;
   els.studyPauseBtn.textContent = "Pause";
+  startStudyTimerInterval();
   persistStudyTimer();
   updateStudyTimerDisplay();
 }
@@ -561,7 +566,7 @@ function toggleStudyPause() {
     studyTimer.elapsedPausedMs += Date.now() - studyTimer.pausedAt;
     studyTimer.paused = false;
     studyTimer.pausedAt = null;
-    studyTimer.intervalId = window.setInterval(updateStudyTimerDisplay, 1000);
+    startStudyTimerInterval();
     els.studyPauseBtn.textContent = "Pause";
   } else {
     studyTimer.paused = true;
@@ -852,6 +857,8 @@ function sessionCoversTopic(session, subjectId, topicId) {
 
 function stopStudyMode() {
   window.clearInterval(studyTimer.intervalId);
+  window.clearTimeout(studyTimerHoverTimeout);
+  studyTimerSecondsHidden = false;
   studyTimer = {
     active: false,
     paused: false,
@@ -868,7 +875,30 @@ function stopStudyMode() {
 }
 
 function updateStudyTimerDisplay() {
-  els.studyTimer.textContent = formatDuration(getStudyElapsedMs());
+  els.studyTimer.textContent = formatDuration(getStudyElapsedMs(), studyTimerSecondsHidden);
+}
+
+function startStudyTimerInterval() {
+  window.clearInterval(studyTimer.intervalId);
+  if (!studyTimer.active || studyTimer.paused) return;
+  studyTimer.intervalId = window.setInterval(updateStudyTimerDisplay, studyTimerSecondsHidden ? 60000 : 1000);
+}
+
+function handleAppPointerLeave() {
+  window.clearTimeout(studyTimerHoverTimeout);
+  studyTimerHoverTimeout = window.setTimeout(() => {
+    studyTimerSecondsHidden = true;
+    startStudyTimerInterval();
+    updateStudyTimerDisplay();
+  }, 1000);
+}
+
+function handleAppPointerEnter() {
+  window.clearTimeout(studyTimerHoverTimeout);
+  if (!studyTimerSecondsHidden) return;
+  studyTimerSecondsHidden = false;
+  startStudyTimerInterval();
+  updateStudyTimerDisplay();
 }
 
 function getStudyElapsedMs() {
@@ -900,7 +930,7 @@ function restoreStudyTimer() {
     els.studyStartBtn.hidden = true;
     els.studyActive.hidden = false;
     els.studyPauseBtn.textContent = studyTimer.paused ? "Resume" : "Pause";
-    if (!studyTimer.paused) studyTimer.intervalId = window.setInterval(updateStudyTimerDisplay, 1000);
+    if (!studyTimer.paused) startStudyTimerInterval();
     updateStudyTimerDisplay();
   } catch {
     clearPersistedStudyTimer();
@@ -2378,12 +2408,14 @@ function formatDate(iso) {
   });
 }
 
-function formatDuration(ms) {
+function formatDuration(ms, hideSeconds = false) {
   const totalSeconds = Math.floor(ms / 1000);
   const hours = Math.floor(totalSeconds / 3600);
   const minutes = Math.floor((totalSeconds % 3600) / 60);
   const seconds = totalSeconds % 60;
-  return [hours, minutes, seconds].map((part) => String(part).padStart(2, "0")).join(":");
+  const parts = [hours, minutes].map((part) => String(part).padStart(2, "0"));
+  parts.push(hideSeconds ? "--" : String(seconds).padStart(2, "0"));
+  return parts.join(":");
 }
 
 function formatShortDate(iso) {
