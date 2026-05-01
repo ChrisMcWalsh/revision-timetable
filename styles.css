@@ -464,6 +464,22 @@ h2 {
   color: var(--muted);
 }
 
+#addModuleBtn {
+  font-weight: 900;
+}
+
+:root[data-theme="dark"] #addModuleBtn {
+  border-color: var(--line);
+  background: var(--panel-2);
+  color: var(--ink);
+}
+
+:root[data-theme="dark"] #addModuleBtn:hover {
+  border-color: var(--brand);
+  background: var(--brand);
+  color: var(--brand-on);
+}
+
 .filter-label,
 label {
   display: grid;
