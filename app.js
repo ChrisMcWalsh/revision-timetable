@@ -1467,13 +1467,17 @@ function renderCalendarEditor() {
 
   const timeRail = document.createElement("div");
   timeRail.className = "calendar-time-rail";
-  timeRail.innerHTML = `<div class="calendar-day-title">Time</div>`;
+  timeRail.innerHTML = `
+    <div class="calendar-day-title">Time</div>
+    <div class="calendar-time-grid"></div>
+  `;
+  const timeGrid = timeRail.querySelector(".calendar-time-grid");
   for (let minutes = DAY_START_MINUTES; minutes <= DAY_END_MINUTES; minutes += 60) {
     const tick = document.createElement("div");
     tick.className = "calendar-time-tick";
     tick.style.top = `${(minutes - DAY_START_MINUTES) * CALENDAR_PIXELS_PER_MINUTE}px`;
     tick.textContent = minutesToTime(minutes);
-    timeRail.append(tick);
+    timeGrid.append(tick);
   }
   els.calendarEditor.append(timeRail);
 

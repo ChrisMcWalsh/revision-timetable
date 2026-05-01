@@ -563,7 +563,14 @@ textarea {
 }
 
 .calendar-time-rail {
+  display: grid;
+  grid-template-rows: auto var(--editor-day-height);
+  min-width: 0;
+}
+
+.calendar-time-grid {
   position: relative;
+  height: var(--editor-day-height);
 }
 
 .calendar-time-tick {
